@@ -1,0 +1,11 @@
+services:
+  - type: worker
+    name: hisobot-bot
+    runtime: python
+    repo: https://github.com/abdullohwebdev/abdulloh_hisobot_bot
+    branch: main
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
