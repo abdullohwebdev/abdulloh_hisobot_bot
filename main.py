@@ -1,177 +1,93 @@
-import logging
-import sqlite3
-import pandas as pd
-import asyncio
-from datetime import datetime, timedelta
-from telegram import Update, InputFile, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
-)
+import os
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-TOKEN = "1.7913542675:AAEvlNlHmWPFl1OTfHJAy5gbxeHCX_Gjz5U"
-ADMIN_PHONE = "+998934803040"
+# Xotirada ma'lumot saqlanadi
+user_data = {}
 
-conn = sqlite3.connect("data.db", check_same_thread=False)
-cursor = conn.cursor()
+ADMIN = "998934803040"  # faqat siz admin
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    phone TEXT
-)
-""")
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS records (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    type TEXT,
-    purpose TEXT,
-    amount REAL,
-    date TEXT
-)
-""")
-
-conn.commit()
-
-logging.basicConfig(level=logging.INFO)
-
-
-# --- Contact qabul qilish ---
-async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    contact = update.message.contact
-    user_id = update.message.from_user.id
-
-    cursor.execute("INSERT OR REPLACE INTO users(user_id, phone) VALUES (?,?)",
-                   (user_id, contact.phone_number))
-    conn.commit()
-
-    await update.message.reply_text("Ro‘yxatdan o‘tdingiz! Endi botdan foydalanishingiz mumkin.")
-    await start(update, context)
-
-
-# --- Admin tekshiruvi ---
-def is_admin(phone):
-    return phone == ADMIN_PHONE
-
-
-# --- /start ---
+# start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
-    user = cursor.execute("SELECT phone FROM users WHERE user_id=?", (user_id,)).fetchone()
-
-    if not user:
-        kb = [[KeyboardButton("Telefon raqamni ulashish", request_contact=True)]]
-        await update.message.reply_text(
-            "Botdan foydalanish uchun telefon raqamingizni ulashing:",
-            reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True)
-        )
-        return
-
+    tel = update.message.from_user.phone_number if update.message.contact else None
     await update.message.reply_text(
-        "Botga xush kelibsiz!\n\n"
-        "Kirim qo‘shish: /kirim maqsad miqdor\n"
-        "Chiqim qo‘shish: /chiqim maqsad miqdor\n"
-        "Hisobot: /hisobot\n"
-        "Excel: /excel\n"
-        "Admin: /add userID"
+        "Assalomu alaykum!\nKirim/chiqim kiritish:\n"
+        "kirim 20000 non\n"
+        "chiqim 12000 choy\n"
+        "/hisobot — hisobot ko‘rish"
     )
 
-
-# --- /add (faqat admin) ---
-async def add_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
-    phone = cursor.execute("SELECT phone FROM users WHERE user_id=?", (user_id,)).fetchone()
-
-    if not phone or not is_admin(phone[0]):
-        await update.message.reply_text("Siz admin emassiz!")
-        return
-
-    try:
-        new_user = int(context.args[0])
-        cursor.execute("INSERT OR IGNORE INTO users(user_id, phone) VALUES (?,?)", (new_user, "unknown"))
-        conn.commit()
-        await update.message.reply_text("Foydalanuvchi qo‘shildi!")
-    except:
-        await update.message.reply_text("To‘g‘ri format: /add userID")
-
-
-# --- Kirim ---
+# Kirim
 async def kirim(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        purpose = context.args[0]
-        amount = float(context.args[1])
-        user_id = update.message.from_user.id
-        date = datetime.now().strftime("%Y-%m-%d")
+    text = update.message.text.split(maxsplit=2)
+    if len(text) < 3:
+        return await update.message.reply_text("❗ Misol: kirim 20000 non")
 
-        cursor.execute("INSERT INTO records(user_id, type, purpose, amount, date) VALUES (?,?,?,?,?)",
-                       (user_id, "kirim", purpose, amount, date))
-        conn.commit()
+    summa, maqsad = text[1], text[2]
+    uid = update.message.from_user.id
 
-        await update.message.reply_text("Kirim qo‘shildi!")
-    except:
-        await update.message.reply_text("Foydalanish: /kirim maqsad miqdor")
+    user_data.setdefault(uid, {"kirim": [], "chiqim": []})
+    user_data[uid]["kirim"].append((summa, maqsad))
 
+    await update.message.reply_text(f"✔ Kirim qo‘shildi: {summa} — {maqsad}")
 
-# --- Chiqim ---
+# Chiqim
 async def chiqim(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        purpose = context.args[0]
-        amount = float(context.args[1])
-        user_id = update.message.from_user.id
-        date = datetime.now().strftime("%Y-%m-%d")
+    text = update.message.text.split(maxsplit=2)
+    if len(text) < 3:
+        return await update.message.reply_text("❗ Misol: chiqim 12000 choy")
 
-        cursor.execute("INSERT INTO records(user_id, type, purpose, amount, date) VALUES (?,?,?,?,?)",
-                       (user_id, "chiqim", purpose, amount, date))
-        conn.commit()
+    summa, maqsad = text[1], text[2]
+    uid = update.message.from_user.id
 
-        await update.message.reply_text("Chiqim qo‘shildi!")
-    except:
-        await update.message.reply_text("Foydalanish: /chiqim maqsad miqdor")
+    user_data.setdefault(uid, {"kirim": [], "chiqim": []})
+    user_data[uid]["chiqim"].append((summa, maqsad))
 
+    await update.message.reply_text(f"✔ Chiqim qo‘shildi: {summa} — {maqsad}")
 
-# --- Hisobot ---
+# Hisobot
 async def hisobot(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
-    rows = cursor.execute("SELECT type, amount FROM records WHERE user_id=?", (user_id,)).fetchall()
+    uid = update.message.from_user.id
+    data = user_data.get(uid)
 
-    if not rows:
-        await update.message.reply_text("Hali ma'lumot yo‘q.")
-        return
+    if not data:
+        return await update.message.reply_text("📝 Hali hech narsa kiritilmagan!")
 
-    kirim = sum(r[1] for r in rows if r[0] == "kirim")
-    chiqim = sum(r[1] for r in rows if r[0] == "chiqim")
+    jami_kirim = sum(int(x[0]) for x in data["kirim"])
+    jami_chiqim = sum(int(x[0]) for x in data["chiqim"])
+    balans = jami_kirim - jami_chiqim
 
-    await update.message.reply_text(
-        f"📊 Hisobot:\n"
-        f"🟢 Kirim: {kirim}\n🔴 Chiqim: {chiqim}\n💰 Balans: {kirim - chiqim}"
+    text = "📊 *HISOBOT*\n\n"
+
+    text += "🟩 *Kirimlar:*\n"
+    for s, m in data["kirim"]:
+        text += f" + {s} — {m}\n"
+
+    text += "\n🟥 *Chiqimlar:*\n"
+    for s, m in data["chiqim"]:
+        text += f" - {s} — {m}\n"
+
+    text += (
+        f"\n💰 Jami kirim: {jami_kirim}\n"
+        f"💸 Jami chiqim: {jami_chiqim}\n"
+        f"📦 Balans: {balans}"
     )
 
+    await update.message.reply_text(text, parse_mode="Markdown")
 
-# --- Excel ---
-async def excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
-    df = pd.read_sql_query(f"SELECT * FROM records WHERE user_id={user_id}", conn)
+# Run
+def main():
+    TOKEN = os.getenv("BOT_TOKEN")
+    app = Application.builder().token(TOKEN).build()
 
-    path = "hisobot.xlsx"
-    df.to_excel(path, index=False)
-
-    await update.message.reply_document(InputFile(path))
-
-
-async def main():
-    app = ApplicationBuilder().token(TOKEN).build()
-
-    app.add_handler(MessageHandler(filters.CONTACT, contact_handler))
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("kirim", kirim))
-    app.add_handler(CommandHandler("chiqim", chiqim))
     app.add_handler(CommandHandler("hisobot", hisobot))
-    app.add_handler(CommandHandler("excel", excel))
-    app.add_handler(CommandHandler("add", add_user))
 
-    await app.run_polling()
+    app.add_handler(MessageHandler(filters.Regex("^kirim"), kirim))
+    app.add_handler(MessageHandler(filters.Regex("^chiqim"), chiqim))
 
+    print("Bot ishga tushdi...")
+    app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
